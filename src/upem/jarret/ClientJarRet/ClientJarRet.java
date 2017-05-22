@@ -26,18 +26,18 @@ public class ClientJarRet {
 
 	private String clientId;
 	private String serverAddress;
-	private final SocketChannel socketChannel;
+	private SocketChannel socketChannel;
 	private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
 	private static final int MAX_BUFFER_SIZE = 4096;
 	private HTTPHeader currentHeader;
 	private String currentContent;
+	private int port;
 	private final List<Worker> workers;
 
 	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
 		this.clientId = Objects.requireNonNull(clientId);
 		this.serverAddress = Objects.requireNonNull(serverAddress);
-		this.socketChannel = SocketChannel.open();
-		this.socketChannel.connect(new InetSocketAddress(serverAddress, port));
+		this.port = port;
 		this.workers = new LinkedList<>();
 	}
 
@@ -111,6 +111,8 @@ public class ClientJarRet {
 	}
 
 	private void sendGetTaskRequest() throws IOException {
+		this.socketChannel = SocketChannel.open();
+		this.socketChannel.connect(new InetSocketAddress(serverAddress, port));
 		System.out.println("Asking for a new Task	");
 		String request = "GET Task HTTP/1.1\r\n" + "Host: " + serverAddress + "\r\n" + "\r\n";
 		this.socketChannel.write(CHARSET_UTF_8.encode(request));
@@ -167,6 +169,8 @@ public class ClientJarRet {
 		ByteBuffer buffer = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		HTTPReader reader = new HTTPReader(socketChannel, buffer);
 		currentHeader = reader.readHeader();
+		System.out.println(currentHeader);
+
 		int code = currentHeader.getCode();
 		if (code == 301) {
 			throw new HTTPException("The asked resource was definitively moved");
@@ -213,8 +217,9 @@ public class ClientJarRet {
 		bufferToSend.flip();
 		// System.err.println("DECODING\n" + "JobId : " + bufferToSend.getLong()
 		// + "\nTask : " + bufferToSend.getInt()
-		//	+ "\n" + CHARSET_UTF_8.decode(bufferToSend));
+		// + "\n" + CHARSET_UTF_8.decode(bufferToSend));
 		System.err.println("SENT : " + this.socketChannel.write(bufferToSend));
+		socketChannel.close();
 	}
 
 	public static void main(String[] args) throws IOException, NumberFormatException, InterruptedException {
