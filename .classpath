@@ -2,8 +2,8 @@
 <classpath>
 	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-9"/>
-	<classpathentry kind="lib" path="/home/jlilimk/Documents/ESIPE/PapayaDB/mini-vertx/vertx/lib/jackson-databind-2.7.4.jar"/>
-	<classpathentry kind="lib" path="/home/jlilimk/Documents/ESIPE/PapayaDB/mini-vertx/vertx/lib/jackson-core-2.7.4.jar"/>
-	<classpathentry kind="lib" path="/home/jlilimk/Documents/ESIPE/PapayaDB/mini-vertx/vertx/lib/jackson-annotations-2.7.0.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-annotations-2.7.0.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-core-2.7.4.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-databind-2.7.4.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

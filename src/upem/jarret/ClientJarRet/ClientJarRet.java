@@ -30,7 +30,7 @@ public class ClientJarRet {
 	private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
 	private static final int MAX_BUFFER_SIZE = 4096;
 	private HTTPHeader currentHeader;
-	private String currentContent;
+	private String jobDescription;
 	private int port;
 	private final List<Worker> workers;
 
@@ -119,43 +119,59 @@ public class ClientJarRet {
 	}
 
 	private void sendComputationErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(currentContent);
+		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Computation error");
-		String request = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
+		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ objectNode.toString().getBytes().length + "\r\n" + "\r\n" + objectNode.toString();
-		this.socketChannel.write(CHARSET_UTF_8.encode(request));
+				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
+		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
+		bufferToSend.putLong(objectNode.get("JobId").asLong());
+		bufferToSend.putInt(objectNode.get("Task").asInt());
+		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
 	private void sendTooLongErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(currentContent);
+		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Too Long");
-		String request = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
+		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ objectNode.toString().getBytes().length + "\r\n" + "\r\n" + objectNode.toString();
-		this.socketChannel.write(CHARSET_UTF_8.encode(request));
+				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
+		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
+		bufferToSend.putLong(objectNode.get("JobId").asLong());
+		bufferToSend.putInt(objectNode.get("Task").asInt());
+		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
 	private void sendAnswerNestedErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(currentContent);
+		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is nested");
-		String request = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
+		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ objectNode.toString().getBytes().length + "\r\n" + "\r\n" + objectNode.toString();
-		this.socketChannel.write(CHARSET_UTF_8.encode(request));
+				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
+		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
+		bufferToSend.putLong(objectNode.get("JobId").asLong());
+		bufferToSend.putInt(objectNode.get("Task").asInt());
+		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
 	private void sendNotJsonErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(currentContent);
+		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is not valid JSON");
-		String request = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
+		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ objectNode.toString().getBytes().length + "\r\n" + "\r\n" + objectNode.toString();
-		this.socketChannel.write(CHARSET_UTF_8.encode(request));
+				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
+		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
+		bufferToSend.putLong(objectNode.get("JobId").asLong());
+		bufferToSend.putInt(objectNode.get("Task").asInt());
+		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
 	private ObjectNode fromStringToJson(String content) throws JsonProcessingException, IOException {
@@ -169,8 +185,6 @@ public class ClientJarRet {
 		ByteBuffer buffer = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		HTTPReader reader = new HTTPReader(socketChannel, buffer);
 		currentHeader = reader.readHeader();
-		System.out.println(currentHeader);
-
 		int code = currentHeader.getCode();
 		if (code == 301) {
 			throw new HTTPException("The asked resource was definitively moved");
@@ -192,9 +206,9 @@ public class ClientJarRet {
 		}
 		ByteBuffer contentBuffer = reader.readBytes(currentHeader.getContentLength());
 		contentBuffer.flip();
-		currentContent = currentHeader.getCharset().decode(contentBuffer).toString();
-		System.out.println(currentContent);
-		return Optional.of(currentContent);
+		jobDescription = currentHeader.getCharset().decode(contentBuffer).toString();
+		System.out.println(jobDescription);
+		return Optional.of(jobDescription);
 	}
 
 	public void sendBackAnswer(ObjectNode objectNode, ObjectNode computationResult)
@@ -215,10 +229,7 @@ public class ClientJarRet {
 		bufferToSend.putInt(objectNode.get("Task").asInt());
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
-		// System.err.println("DECODING\n" + "JobId : " + bufferToSend.getLong()
-		// + "\nTask : " + bufferToSend.getInt()
-		// + "\n" + CHARSET_UTF_8.decode(bufferToSend));
-		System.err.println("SENT : " + this.socketChannel.write(bufferToSend));
+		this.socketChannel.write(bufferToSend);
 		socketChannel.close();
 	}
 
