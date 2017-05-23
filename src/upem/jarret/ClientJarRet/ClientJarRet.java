@@ -24,14 +24,15 @@ import upem.jarret.worker.WorkerFactory;
 
 public class ClientJarRet {
 
-	private String clientId;
-	private String serverAddress;
-	private SocketChannel socketChannel;
 	private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
 	private static final int MAX_BUFFER_SIZE = 4096;
+
+	private String serverAddress;
+	private int port;
+	private String clientId;
+	private SocketChannel socketChannel;
 	private HTTPHeader currentHeader;
 	private String jobDescription;
-	private int port;
 	private final List<Worker> workers;
 
 	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
@@ -247,7 +248,7 @@ public class ClientJarRet {
 				if (objectNode.get("ComeBackInSeconds") != null) {
 					System.out.println("SLEEPING for : "
 							+ Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) + " seconds");
-					Thread.sleep(Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) * 10);
+					Thread.sleep(Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) * 1000);
 					continue;
 				}
 				System.out.println("Received Task " + objectNode.get("JobId") + " for " + objectNode.get("Task") + " ("
@@ -262,8 +263,6 @@ public class ClientJarRet {
 					}
 					client.sendBackAnswer(objectNode, computationResult);
 				}
-			} else {
-				System.out.println("EMPTY");
 			}
 		}
 	}
