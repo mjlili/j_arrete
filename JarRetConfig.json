@@ -1,0 +1,7 @@
+{
+	"ServerPort" : "4545",
+	"MaxResponseFileSize" : "2000",
+	"ComeBackInSeconds" : "300",
+	"ResponsesFolderPath" : "/responses",
+	"LogsFolderPath" : "/logs"
+}
