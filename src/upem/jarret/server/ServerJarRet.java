@@ -1,5 +1,6 @@
 package upem.jarret.server;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -9,11 +10,19 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class ServerJarRet {
 
@@ -98,12 +107,44 @@ public class ServerJarRet {
 	private static final long TIMEOUT = 3000;
 	private Thread listener;
 	private final static BlockingQueue<String> queue = new LinkedBlockingQueue<>(5);
+	private String responsesFolderPath;
+	private String logsFolderPath;
+	private int serverPort;
+	private long maxResponseFileSize;
+	private long comeBackInSeconds;
 
-	public ServerJarRet(int port) throws IOException {
+	private ServerJarRet(int port) throws IOException {
 		serverSocketChannel = ServerSocketChannel.open();
 		serverSocketChannel.bind(new InetSocketAddress(port));
 		selector = Selector.open();
 		selectedKeys = selector.selectedKeys();
+	}
+
+	public static ServerJarRet getServerJarRet() throws IOException {
+		ObjectNode configs = fromStringToJson(parseJsonFile("JarRetConfig.json"));
+		int serverPort = configs.get("ServerPort").asInt();
+		ServerJarRet server = new ServerJarRet(serverPort);
+		server.maxResponseFileSize = configs.get("MaxResponseFileSize").asLong();
+		server.comeBackInSeconds = configs.get("ComeBackInSeconds").asLong();
+		server.responsesFolderPath = configs.get("ResponsesFolderPath").asText();
+		server.logsFolderPath = configs.get("LogsFolderPath").asText();
+		return server;
+	}
+
+	private static String parseJsonFile(String path) throws IOException {
+		Path filePath = Paths.get(path);
+		BufferedReader reader = Files.newBufferedReader(filePath);
+		StringBuilder sb = new StringBuilder();
+		reader.lines().forEach(line -> sb.append(line));
+		reader.close();
+		return sb.toString();
+	}
+
+	private static ObjectNode fromStringToJson(String content) throws JsonProcessingException, IOException {
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree(content);
+		ObjectNode objectNode = (ObjectNode) node;
+		return objectNode;
 	}
 
 	public void startCommandListener(InputStream in) {
@@ -326,7 +367,7 @@ public class ServerJarRet {
 			usage();
 			return;
 		}
-		ServerJarRet server = new ServerJarRet(Integer.parseInt(args[0]));
+		ServerJarRet server = ServerJarRet.getServerJarRet();
 		server.startCommandListener(System.in);
 		server.launch();
 	}
