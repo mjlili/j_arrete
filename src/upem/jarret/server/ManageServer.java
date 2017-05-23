@@ -1,6 +1,9 @@
 package upem.jarret.server;
 
+import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
@@ -24,9 +27,9 @@ public class ManageServer {
 	}
 	
 	private static void writeStringToFile(String text,String jobFileName) throws FileNotFoundException {
-		//*Recreate file if exists*/
-		try(  PrintWriter out = new PrintWriter(jobFileName)){
-		    out.println(text);
+		//*Append to file if file exists*/
+		try (PrintWriter out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(new FileOutputStream(jobFileName, true), UTF8_CHARSET)))) {
+			out.println(text);
 		}
 	}
 }
