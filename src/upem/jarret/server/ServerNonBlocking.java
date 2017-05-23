@@ -23,6 +23,16 @@ public class ServerNonBlocking {
 		selectedKeys = selector.selectedKeys();
 	}
 
+	private void launchConsole() {
+		new Thread(()-> {			
+			while(!Thread.interrupted()) {
+				
+				
+				
+			}				
+		}).start();
+	}
+	
 	public void launch() throws IOException {
 		serverSocketChannel.configureBlocking(false);
 		serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
