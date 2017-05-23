@@ -1,0 +1,34 @@
+{ "workers":
+[
+{
+ "JobId" :  "1"  ,
+ "JobTaskNumber" : "1000",
+ "JobDescription" : "Test job",
+ "JobPriority" : "3",
+ "WorkerVersionNumber" : "1.2"  ,
+ "WorkerURL" :  "http://www.test.fr/test1.jar",
+ "WorkerClassName" : "test.test"
+}
+,
+{
+ "JobId" :  "2"  ,
+ "JobTaskNumber" : "100000",
+ "JobDescription" : "Test job",
+ "JobPriority" : "0",
+ "WorkerVersionNumber" : "1.2"  ,
+ "WorkerURL" :  "http://www.test.fr/test2.jar",
+ "WorkerClassName" : "test.test"
+}
+,
+{
+ "JobId" :  "3"  ,
+ "JobTaskNumber" : "2",
+ "JobDescription" : "Test job with a â‚¬ in the description",
+ "JobPriority" : "2",
+ "WorkerVersionNumber" : "1.3"  ,
+ "WorkerURL" :  "http://www.test.fr/test3.jar",
+ "WorkerClassName" : "test.test"
+}
+
+]
+}
