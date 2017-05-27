@@ -1,6 +1,7 @@
 package upem.jarret.server;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -10,19 +11,30 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerationException;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import upem.jarret.job.Job;
 
 public class ServerJarRet {
 
@@ -33,6 +45,9 @@ public class ServerJarRet {
 		private final SelectionKey key;
 		private final SocketChannel sc;
 		private long inactiveTime;
+		private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
+		private String httpVersion;
+		public Job priorityJob;
 
 		public Context(SelectionKey key) {
 			this.key = key;
@@ -61,14 +76,20 @@ public class ServerJarRet {
 
 		private void process() {
 			in.flip();
-			if (in.remaining() < 2 * Integer.BYTES) {
+			if (in.remaining() < "GET".length()) {
 				in.compact();
 				return;
 			}
-			int opsCount = in.remaining() / (2 * Integer.BYTES);
-			for (int i = 0; i < opsCount; i++) {
-				out.putInt(in.getInt() + in.getInt());
+			String response = CHARSET_UTF_8.decode(in).toString();
+			if (response.startsWith("GET")) {
+				String tokens[] = response.split(" ");
+				httpVersion = tokens[2].split(System.lineSeparator())[0].replace("\r\n", "");
 			}
+			int indexOfAvailableTask = priorityJob.getIndexOfAvailableTask();
+			String jobDescription = ServerJarRet.formatJobDescription(priorityJob, indexOfAvailableTask);
+			String jobDescriptionAnswer = ServerJarRet.formatJobDescriptionAnswer("HTTP/1.1", jobDescription);
+			System.out.println(jobDescriptionAnswer);
+			out.put(CHARSET_UTF_8.encode(jobDescriptionAnswer));
 			in.compact();
 		}
 
@@ -100,7 +121,7 @@ public class ServerJarRet {
 
 	}
 
-	private static final int BUF_SIZE = 512;
+	private static final int BUF_SIZE = 4096;
 	private final ServerSocketChannel serverSocketChannel;
 	private final Selector selector;
 	private final Set<SelectionKey> selectedKeys;
@@ -112,12 +133,14 @@ public class ServerJarRet {
 	private int serverPort;
 	private long maxResponseFileSize;
 	private long comeBackInSeconds;
+	private final List<Job> jobs;
 
 	private ServerJarRet(int port) throws IOException {
 		serverSocketChannel = ServerSocketChannel.open();
 		serverSocketChannel.bind(new InetSocketAddress(port));
 		selector = Selector.open();
 		selectedKeys = selector.selectedKeys();
+		this.jobs = new ArrayList<>();
 	}
 
 	public static ServerJarRet getServerJarRet() throws IOException {
@@ -129,6 +152,30 @@ public class ServerJarRet {
 		server.responsesFolderPath = configs.get("ResponsesFolderPath").asText();
 		server.logsFolderPath = configs.get("LogsFolderPath").asText();
 		return server;
+	}
+
+	public static String formatJobDescription(Job job, int taskNumber) {
+		StringBuilder sb = new StringBuilder();
+		sb.append("{\"JobId\": \"").append(job.getJobId()).append("\",").append("\"WorkerVersion\": \"")
+				.append(job.getWorkerVersionNumber()).append("\", ").append("\"WorkerURL\": \"")
+				.append(job.getWorkerURL()).append("\", ").append("\"WorkerClassName\": \"")
+				.append(job.getWorkerClassName()).append("\", ").append("\"Task\": \"").append(taskNumber)
+				.append("\"}");
+		return sb.toString();
+
+	}
+
+	public static String formatJobDescriptionAnswer(String HTTPversion, String jobDescription) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(HTTPversion).append(" ").append(200).append(" OK\r\n")
+				.append("Content-type: application/json; charset=utf-8\r\n").append("Content-Length: ")
+				.append(jobDescription.length()).append("\r\n").append("\r\n").append(jobDescription);
+		return sb.toString();
+	}
+
+	private Job getMostPriorityJob() {
+		Job job = jobs.stream().max((p1, p2) -> Integer.compare(p1.getJobPriority(), p2.getJobPriority())).get();
+		return job;
 	}
 
 	private static String parseJsonFile(String path) throws IOException {
@@ -145,6 +192,48 @@ public class ServerJarRet {
 		JsonNode node = mapper.readTree(content);
 		ObjectNode objectNode = (ObjectNode) node;
 		return objectNode;
+	}
+
+	/**
+	 * Parses a Json file and return a List of ObjectNode from the file
+	 * 
+	 * @param file
+	 *            String file pathname
+	 * @return List of {@link ObjectNode} the list of json documents to be
+	 *         inserted in the database
+	 */
+	private static List<ObjectNode> parseJsonJobsDescriptionFile(String file) {
+		ObjectMapper mapper = new ObjectMapper();
+		List<ObjectNode> nodes = new LinkedList<ObjectNode>();
+
+		try {
+			JsonParser jsonParser = new JsonFactory().createParser(new File(file));
+			MappingIterator<ObjectNode> jsonObject = mapper.readValues(jsonParser, ObjectNode.class);
+			while (jsonObject.hasNext()) {
+				ObjectNode node = jsonObject.next();
+				nodes.add(node);
+			}
+		} catch (JsonGenerationException e) {
+			e.printStackTrace();
+		} catch (JsonMappingException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return nodes;
+	}
+
+	private Optional<List<Job>> getJobsFromNodes(List<ObjectNode> nodes) {
+		List<Job> jobs = new ArrayList<>();
+		ObjectMapper mapper = new ObjectMapper();
+		for (ObjectNode node : nodes) {
+			try {
+				jobs.add(mapper.treeToValue(node, Job.class));
+			} catch (JsonProcessingException e) {
+				return Optional.empty();
+			}
+		}
+		return Optional.of(jobs);
 	}
 
 	public void startCommandListener(InputStream in) {
@@ -166,24 +255,32 @@ public class ServerJarRet {
 	}
 
 	public void launch() throws IOException {
-		serverSocketChannel.configureBlocking(false);
-		serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
-		Set<SelectionKey> selectedKeys = selector.selectedKeys();
-		while (!Thread.interrupted()) {
-			// printKeys();
-			// System.out.println("Starting select");
-			long startLoop = System.currentTimeMillis();
-			selector.select(TIMEOUT / 10);
-			processCommands();
-			// printSelectedKey();
-			// System.out.println("Select finished");
-			processSelectedKeys();
-			long endLoop = System.currentTimeMillis();
-			long timeSpent = endLoop - startLoop;
-			updateInactivityKeys(timeSpent);
-			selectedKeys.clear();
+		List<ObjectNode> jobNodes = parseJsonJobsDescriptionFile("workerdescription.json");
+		Optional<List<Job>> jobsOptional = getJobsFromNodes(jobNodes);
+		if (jobsOptional.isPresent()) {
+			jobs.addAll(jobsOptional.get());
+			serverSocketChannel.configureBlocking(false);
+			serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+			Set<SelectionKey> selectedKeys = selector.selectedKeys();
+			while (!Thread.interrupted()) {
+				// printKeys();
+				// System.out.println("Starting select");
+				long startLoop = System.currentTimeMillis();
+				selector.select(TIMEOUT / 10);
+				processCommands();
+				// printSelectedKey();
+				// System.out.println("Select finished");
+				processSelectedKeys();
+				long endLoop = System.currentTimeMillis();
+				long timeSpent = endLoop - startLoop;
+
+				updateInactivityKeys(timeSpent);
+				selectedKeys.clear();
+			}
+			selector.close();
+		} else {
+			System.err.println("Error during json file parsing!");
 		}
-		selector.close();
 	}
 
 	private void processCommands() throws IOException {
@@ -254,6 +351,7 @@ public class ServerJarRet {
 					cntxt.doWrite();
 				}
 				if (key.isValid() && key.isReadable()) {
+					cntxt.priorityJob = getMostPriorityJob();
 					cntxt.doRead();
 				}
 			} catch (IOException e) {
@@ -280,7 +378,7 @@ public class ServerJarRet {
 	}
 
 	private static void usage() {
-		System.out.println("ServerSumNew <listeningPort>");
+		System.out.println("ServerJarRet");
 	}
 
 	/***
@@ -363,10 +461,10 @@ public class ServerJarRet {
 	}
 
 	public static void main(String[] args) throws NumberFormatException, IOException {
-		if (args.length != 1) {
-			usage();
-			return;
-		}
+		// if (args.length != 1) {
+		// usage();
+		// return;
+		// }
 		ServerJarRet server = ServerJarRet.getServerJarRet();
 		server.startCommandListener(System.in);
 		server.launch();

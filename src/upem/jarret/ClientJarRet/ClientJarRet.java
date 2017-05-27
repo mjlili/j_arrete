@@ -6,12 +6,11 @@ import java.net.MalformedURLException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
+import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,26 +32,27 @@ public class ClientJarRet {
 	private SocketChannel socketChannel;
 	private HTTPHeader currentHeader;
 	private String jobDescription;
-	private final List<Worker> workers;
+	private final HashMap<Long, HashMap<String, Worker>> workers;
 
 	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
 		this.clientId = Objects.requireNonNull(clientId);
 		this.serverAddress = Objects.requireNonNull(serverAddress);
 		this.port = port;
-		this.workers = new LinkedList<>();
+		this.workers = new LinkedHashMap<>();
 	}
 
 	private Optional<Worker> getExistingWorkerInstance(ObjectNode objecNode) {
-		List<Worker> existing = workers.stream()
-				.filter(worker -> worker.getJobId() == Long.parseLong(objecNode.get("JobId").asText())
-						&& worker.getVersion().equals(objecNode.get("WorkerVersion")))
-				.collect(Collectors.toList());
-		if (existing.isEmpty()) {
-			return Optional.empty();
+		HashMap<String, Worker> workerByJobId = this.workers.get(objecNode.get("JobId"));
+		if (workerByJobId != null) {
+			Worker workerByVersion = workerByJobId.get(objecNode.get("WorkerVersion"));
+			if (workerByVersion != null) {
+				return Optional.of(workerByVersion);
+			}
 		}
-		return Optional.of(existing.get(0));
+		return Optional.empty();
 	}
 
+	// Faire une hashmap qui contient un jobid relié à une hashmap
 	private Worker getFinalWorkerInstance(ObjectNode objectNode) {
 		Worker worker = null;
 		Optional<Worker> existingWorker = getExistingWorkerInstance(objectNode);
@@ -60,9 +60,12 @@ public class ClientJarRet {
 			worker = existingWorker.get();
 		} else {
 			try {
-				worker = WorkerFactory.getWorker(objectNode.get("WorkerURL").asText(),
-						objectNode.get("WorkerClassName").asText());
-				workers.add(worker);
+				String workerUrl = objectNode.get("WorkerURL").asText();
+				String workerClassName = objectNode.get("WorkerClassName").asText();
+				worker = WorkerFactory.getWorker(workerUrl, workerClassName);
+				HashMap<String, Worker> workerByVersion = new LinkedHashMap<>();
+				workerByVersion.put(objectNode.get("WorkerVersion").asText(), worker);
+				workers.put(objectNode.get("JobId").asLong(), workerByVersion);
 			} catch (MalformedURLException | ClassNotFoundException | IllegalAccessException
 					| InstantiationException e) {
 				// TODO Auto-generated catch block
@@ -96,6 +99,11 @@ public class ClientJarRet {
 	private Optional<String> launchComputation(ObjectNode objectNode) throws IOException {
 		System.out.println("Retrieving worker");
 		Worker worker = getFinalWorkerInstance(objectNode);
+		if (worker == null) {
+			System.out.println("Error retieving worker class");
+			sendComputationErrorResponse();
+			return Optional.empty();
+		}
 		int taskId = objectNode.get("Task").asInt();
 		System.out.println("Starting computation");
 		String result = worker.compute(taskId);
@@ -123,51 +131,34 @@ public class ClientJarRet {
 		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Computation error");
-		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
-				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
-		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
-		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
-		bufferToSend.putLong(objectNode.get("JobId").asLong());
-		bufferToSend.putInt(objectNode.get("Task").asInt());
-		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
+		sendErrorResponse(objectNode);
 	}
 
 	private void sendTooLongErrorResponse() throws IOException {
 		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Too Long");
-		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
-				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
-		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
-		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
-		bufferToSend.putLong(objectNode.get("JobId").asLong());
-		bufferToSend.putInt(objectNode.get("Task").asInt());
-		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
+		sendErrorResponse(objectNode);
 	}
 
 	private void sendAnswerNestedErrorResponse() throws IOException {
 		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is nested");
-		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
-				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
-		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
-		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
-		bufferToSend.putLong(objectNode.get("JobId").asLong());
-		bufferToSend.putInt(objectNode.get("Task").asInt());
-		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
+		sendErrorResponse(objectNode);
 	}
 
 	private void sendNotJsonErrorResponse() throws IOException {
 		ObjectNode objectNode = fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is not valid JSON");
+		sendErrorResponse(objectNode);
+	}
+
+	private void sendErrorResponse(ObjectNode objectNode) throws IOException {
 		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
-				+ CHARSET_UTF_8.encode(objectNode.toString()).remaining() + "\r\n" + "\r\n";
+				+ objectNode.toString().length() + "\r\n" + "\r\n";
 		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
 		bufferToSend.putLong(objectNode.get("JobId").asLong());
@@ -195,19 +186,15 @@ public class ClientJarRet {
 			System.out.println("BAD REQUEST");
 			return Optional.empty();
 		}
-		if (!currentHeader.getContentType().equals("application/json")) {
-			System.out.println("There is no JSON content !!");
-			sendNotJsonErrorResponse();
-			return Optional.empty();
-		}
-		int taskLength = currentHeader.toString().getBytes(CHARSET_UTF_8).length + currentHeader.getContentLength();
-		if (taskLength > MAX_BUFFER_SIZE) {
-			// SEND TOOLONG EXCEPTION TO SERVER
-			sendTooLongErrorResponse();
-		}
-		ByteBuffer contentBuffer = reader.readBytes(currentHeader.getContentLength());
+		// if (!currentHeader.getContentType().equals("application/json")) {
+		// System.out.println("There is no JSON content !!");
+		// sendNotJsonErrorResponse();
+		// return Optional.empty();
+		// }
+		int contentLength = currentHeader.getContentLength();
+		ByteBuffer contentBuffer = reader.readBytes(contentLength);
 		contentBuffer.flip();
-		jobDescription = currentHeader.getCharset().decode(contentBuffer).toString();
+		jobDescription = CHARSET_UTF_8.decode(contentBuffer).toString();
 		System.out.println(jobDescription);
 		return Optional.of(jobDescription);
 	}
@@ -219,8 +206,13 @@ public class ClientJarRet {
 		StringBuilder answerHeaderBuilder = new StringBuilder();
 		answerHeaderBuilder.append("POST Answer ").append(currentHeader.getVersion()).append("\r\n").append("Host: ")
 				.append(serverAddress).append("\r\n").append("Content-Type: ").append(currentHeader.getContentType())
-				.append("\r\n").append("Content-Length: ")
-				.append(CHARSET_UTF_8.encode(objectNode.toString()).remaining()).append("\r\n").append("\r\n");
+				.append("\r\n").append("Content-Length: ").append(objectNode.toString().length()).append("\r\n")
+				.append("\r\n");
+		// TOOLONG RESPONSE
+		if (answerHeaderBuilder.toString().length() + objectNode.toString().length() > MAX_BUFFER_SIZE) {
+			sendTooLongErrorResponse();
+			return;
+		}
 		ObjectMapper mapper = new ObjectMapper();
 		String answerContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectNode);
 		System.out.println("Writing answer to server");
@@ -251,7 +243,7 @@ public class ClientJarRet {
 					Thread.sleep(Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) * 1000);
 					continue;
 				}
-				System.out.println("Received Task " + objectNode.get("JobId") + " for " + objectNode.get("Task") + " ("
+				System.out.println("Received Task " + objectNode.get("Task") + " for " + objectNode.get("JobId") + " ("
 						+ objectNode.get("WorkerURL") + ", " + objectNode.get("WorkerClassName") + ", "
 						+ objectNode.get("WorkerVersion") + ")");
 				Optional<String> computationResultOptional = client.launchComputation(objectNode);
