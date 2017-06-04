@@ -354,7 +354,7 @@ public class ServerJarRet {
 
 	public static String formatJobDescriptionAnswer(String jobDescription) {
 		StringBuilder sb = new StringBuilder();
-		sb.append(HTTP_1_1_200_OK).append("Content-type: application/json; charset=utf-8\r\n")
+		sb.append(HTTP_1_1_200_OK).append("Content-Type: application/json; charset=utf-8\r\n")
 				.append("Content-Length: ").append(CHARSET_UTF_8.encode(jobDescription).remaining()).append("\r\n")
 				.append("\r\n").append(jobDescription);
 		return sb.toString();

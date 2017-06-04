@@ -40,6 +40,7 @@ public class ClientJarRet {
 
 	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
 		this.clientId = Objects.requireNonNull(clientId);
+		this.serverAddress = serverAddress;
 		ClientJarRet.server = new InetSocketAddress(Objects.requireNonNull(serverAddress), port);
 		this.workers = new LinkedHashMap<>();
 	}
@@ -234,6 +235,13 @@ public class ClientJarRet {
 			return;
 		}
 		System.out.println("Writing answer to server");
+		ByteBuffer bufferToTest = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToTest.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
+		bufferToTest.putLong(objectNode.get("JobId").asLong());
+		bufferToTest.putInt(objectNode.get("Task").asInt());
+		bufferToTest.put(CHARSET_UTF_8.encode(answerContent));
+		bufferToTest.flip();
+		System.err.println("SENDING ANSWER :\n" + CHARSET_UTF_8.decode(bufferToTest).toString());
 		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		bufferToSend.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
 		bufferToSend.putLong(objectNode.get("JobId").asLong());
@@ -241,7 +249,7 @@ public class ClientJarRet {
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
 		ClientJarRet.socketChannel.write(bufferToSend);
-		socketChannel.close();
+		ClientJarRet.socketChannel.close();
 	}
 
 	public static void main(String[] args) throws IOException, NumberFormatException, InterruptedException {
