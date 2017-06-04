@@ -213,8 +213,6 @@ public class ServerJarRet {
 			String command = tokens[0];
 			String requestNature = tokens[1];
 			String httpVersion = tokens[2];
-			System.out.println(
-					"Command : " + command + " Request Nature : " + requestNature + " HTTP Version :" + httpVersion);
 			if (command.equals("GET") && requestNature.equals("Task") && httpVersion.equals("HTTP/1.1")) {
 				if (!isParsingRequest()) {
 					saveLog("Client " + sc.getRemoteAddress() + " is requesting a task");

@@ -321,15 +321,6 @@ public class ClientJarRet {
 		bufferToSend.putInt(objectNode.get("Task").asInt());
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
-		// BEGIN TESTING
-		ByteBuffer bufferToTest = ByteBuffer.allocate(MAX_BUFFER_SIZE);
-		bufferToTest.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
-		bufferToTest.putLong(objectNode.get("JobId").asLong());
-		bufferToTest.putInt(objectNode.get("Task").asInt());
-		bufferToTest.put(CHARSET_UTF_8.encode(answerContent));
-		bufferToTest.flip();
-		System.err.println(CHARSET_UTF_8.decode(bufferToTest).toString());
-		// END TESTING
 		try {
 			System.out.println("SENT : " + ClientJarRet.socketChannel.write(bufferToSend));
 		} catch (IOException e) {
