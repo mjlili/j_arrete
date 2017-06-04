@@ -58,18 +58,26 @@ public class ServerJarRet {
 		private final SocketChannel sc;
 		private long inactiveTime;
 
+		/**
+		 * Context constructor
+		 * 
+		 * @param key
+		 *            SelectionKey given by the server
+		 * @throws IOException
+		 *             in case of problems in reading from socket channel
+		 */
 		public Context(SelectionKey key) throws IOException {
 			this.key = key;
 			this.sc = (SocketChannel) key.channel();
 			this.reader = new HTTPServerReader(sc, in);
 		}
 
-		// public void clean(SocketChannel sc) throws IOException {
-		// setSendingPost(false);
-		// in.clear();
-		// reader = new HTTPServerReader(sc, in);
-		// }
-
+		/**
+		 * Treats the received data after being called by the selector
+		 * 
+		 * @throws IOException
+		 *             in case of problems in reading from socket channel
+		 */
 		public void doRead() throws IOException {
 			if (sc.read(in) == -1) {
 				inputClosed = true;
@@ -79,6 +87,13 @@ public class ServerJarRet {
 			updateInterestOps();
 		}
 
+		/**
+		 * Parses the received request and performs the needed instructions to
+		 * send responses to client
+		 * 
+		 * @throws IOException
+		 *             in case of problems in reading from socket channel
+		 */
 		private void process() throws IOException {
 			if (isReadingRequest()) {
 				try {
@@ -98,14 +113,26 @@ public class ServerJarRet {
 			if (isRequestingTask()) {
 				setRequestingTask(false);
 				out.put(ServerJarRet.getAvailableTask((SocketChannel) key.channel()));
+			} else if (isSendingPost()) {
+				if (response == null) {
+					throw new IllegalArgumentException("No answer");
+				}
+				if (JsonUtils.isValidJsonString(response)) {
+					out.put(CHARSET_UTF_8.encode(HTTP_1_1_200_OK));
+				} else {
+					out.put(CHARSET_UTF_8.encode(BAD_REQUEST));
+				}
+				reset(sc);
 			}
-			// else if (isSendingPost()) {
-			// // sendCheckCode(key);
-			// key.interestOps(SelectionKey.OP_READ);
-			// }
 			setReadingRequest(true);
 		}
 
+		/**
+		 * Treats the data prepared to be sent after being called by the
+		 * selector
+		 * 
+		 * @throws IOException
+		 */
 		public void doWrite() throws IOException {
 			out.flip();
 			sc.write(out);
@@ -117,6 +144,9 @@ public class ServerJarRet {
 			updateInterestOps();
 		}
 
+		/**
+		 * Updates the InterestOps
+		 */
 		private void updateInterestOps() {
 			int ops = 0;
 			if (out.position() != 0) {
@@ -132,10 +162,35 @@ public class ServerJarRet {
 			}
 		}
 
+		/**
+		 * Set sendingPost to false and create a new HTTPReader for the next
+		 * task
+		 * 
+		 * @param sc
+		 *            the SocketChannel used by the HTTPReader
+		 * @throws IOException
+		 */
+		public void reset(SocketChannel sc) throws IOException {
+			setSendingPost(false);
+			in.clear();
+			reader = new HTTPServerReader(sc, in);
+		}
+
+		/**
+		 * Reset the inactivity counter
+		 */
 		private void resetInactiveTime() {
 			this.inactiveTime = 0L;
 		}
 
+		/**
+		 * Adds time passed in processing to the inactivity time
+		 * 
+		 * @param time
+		 *            to add
+		 * @param timeout
+		 *            to not to pass
+		 */
 		private void addInactiveTime(long time, long timeout) {
 			this.inactiveTime += time;
 			if (inactiveTime > timeout) {
@@ -143,6 +198,14 @@ public class ServerJarRet {
 			}
 		}
 
+		/**
+		 * Parses a request string and dispatches the processing between GET
+		 * method or POST method
+		 * 
+		 * @param sc
+		 *            socket channel between the server and the client
+		 * @throws IOException
+		 */
 		public void parseRequest(SocketChannel sc) throws IOException {
 			String request = getRequest();
 			String firstLine = request.split("\r\n")[0];
@@ -183,6 +246,12 @@ public class ServerJarRet {
 			}
 		}
 
+		/**
+		 * Parses the POST response given by the client
+		 * 
+		 * @return String contains the response content
+		 * @throws IOException
+		 */
 		private String parsePostClientAnswer() throws IOException {
 			if (!isReadingAnswer()) {
 				String line;
@@ -321,6 +390,13 @@ public class ServerJarRet {
 	private static long comeBackInSeconds;
 	private final static BlockingQueue<Job> jobs = new LinkedBlockingQueue<>();
 
+	/**
+	 * ServerJarRet Constructor
+	 * 
+	 * @param port
+	 *            server port
+	 * @throws IOException
+	 */
 	private ServerJarRet(int port) throws IOException {
 		serverSocketChannel = ServerSocketChannel.open();
 		serverSocketChannel.bind(new InetSocketAddress(port));
@@ -328,6 +404,12 @@ public class ServerJarRet {
 		selectedKeys = selector.selectedKeys();
 	}
 
+	/**
+	 * Parses the configuration file and gives the instance of ServerJarRet
+	 * 
+	 * @return instance of ServerJarRet
+	 * @throws IOException
+	 */
 	public static ServerJarRet getServerJarRet() throws IOException {
 		ObjectNode configs = JsonUtils.fromStringToJson(JsonUtils.parseJsonFile("JarRetConfig.json"));
 		int serverPort = configs.get("ServerPort").asInt();
@@ -340,6 +422,14 @@ public class ServerJarRet {
 		return server;
 	}
 
+	/**
+	 * Formats a job description from a Job POJO
+	 * 
+	 * @param job
+	 *            job to convert into a job description
+	 * @return String contains the job description
+	 * @throws IOException
+	 */
 	public static String formatJobDescription(Job job) throws IOException {
 		StringBuilder sb = new StringBuilder();
 		sb.append("{\"JobId\": \"").append(job.getJobId()).append("\",").append("\"WorkerVersion\": \"")
@@ -353,6 +443,13 @@ public class ServerJarRet {
 		return responseContent;
 	}
 
+	/**
+	 * Formats an entire job description query to be sent to client
+	 * 
+	 * @param jobDescription
+	 *            string contains the job description
+	 * @return String contains the entire job description query
+	 */
 	public static String formatJobDescriptionAnswer(String jobDescription) {
 		StringBuilder sb = new StringBuilder();
 		sb.append(HTTP_1_1_200_OK).append("Content-Type: application/json; charset=utf-8\r\n")
@@ -362,9 +459,10 @@ public class ServerJarRet {
 	}
 
 	/**
-	 * Sends the task to the client
+	 * Sends the available task to the client
 	 * 
 	 * @param sc
+	 *            socket channel between the server and the client
 	 * @throws IOException
 	 */
 	private static ByteBuffer getAvailableTask(SocketChannel sc) throws IOException {
@@ -390,18 +488,19 @@ public class ServerJarRet {
 	}
 
 	/**
-	 * Parses a Json file and return a List of ObjectNode from the file
+	 * Parses a Json file and return a List of ObjectNode from the file to load
+	 * jobs to be sent to client
 	 * 
-	 * @param file
+	 * @param fileName
 	 *            String file pathname
-	 * @return List of {@link ObjectNode} the list of json documents to be
-	 *         inserted in the database
+	 * @return List of {@link ObjectNode} the list of job descriptions to be
+	 *         sent to clients
 	 */
-	private List<ObjectNode> parseJsonJobsDescriptionFile(String file) {
+	private List<ObjectNode> loadJobDescriptions(String fileName) {
 		ObjectMapper mapper = new ObjectMapper();
 		List<ObjectNode> nodes = new LinkedList<ObjectNode>();
 		try {
-			JsonParser jsonParser = new JsonFactory().createParser(new File(file));
+			JsonParser jsonParser = new JsonFactory().createParser(new File(fileName));
 			MappingIterator<ObjectNode> jsonObject = mapper.readValues(jsonParser, ObjectNode.class);
 			while (jsonObject.hasNext()) {
 				ObjectNode node = jsonObject.next();
@@ -425,6 +524,13 @@ public class ServerJarRet {
 		return nodes;
 	}
 
+	/**
+	 * Converts a list of nodes to a list of jobs
+	 * 
+	 * @param nodes
+	 *            list of nodes
+	 * @return list of jobs
+	 */
 	private Optional<List<Job>> getJobsFromNodes(List<ObjectNode> nodes) {
 		List<Job> jobs = new ArrayList<>();
 		ObjectMapper mapper = new ObjectMapper();
@@ -439,6 +545,12 @@ public class ServerJarRet {
 		return Optional.of(jobs);
 	}
 
+	/**
+	 * Starts a thread to listen the commands entered by user
+	 * 
+	 * @param in
+	 *            input stream that will be used to enter commands
+	 */
 	public void startCommandListener(InputStream in) {
 		listener = new Thread(() -> {
 			Scanner scanner = new Scanner(in);
@@ -457,6 +569,15 @@ public class ServerJarRet {
 		listener.start();
 	}
 
+	/**
+	 * Saves client responses into local files
+	 * 
+	 * @param jobId
+	 *            long contains jobId
+	 * @param response
+	 *            String contains the response content
+	 * @throws IOException
+	 */
 	private static void saveAnswer(long jobId, String response) throws IOException {
 		int fileNumber = 1;
 		long size = 0;
@@ -479,18 +600,29 @@ public class ServerJarRet {
 		}
 	}
 
-	private static void saveLog(String log) {
+	/**
+	 * Saves logging messages into a local file
+	 * 
+	 * @param message
+	 *            String contains the message to save
+	 */
+	private static void saveLog(String message) {
 		Path logFilePath = Paths.get(logsFolderPath + "log");
 		try (BufferedWriter writer = Files.newBufferedWriter(logFilePath, StandardOpenOption.APPEND,
 				StandardOpenOption.CREATE); PrintWriter outLog = new PrintWriter(writer)) {
-			outLog.println(log);
+			outLog.println(message);
 		} catch (IOException e) {
 			System.err.println(e);
 		}
 	}
 
+	/**
+	 * Launches the ServerJarRet
+	 * 
+	 * @throws IOException
+	 */
 	public void launch() throws IOException {
-		List<ObjectNode> jobNodes = parseJsonJobsDescriptionFile("JobsDescriptions.json");
+		List<ObjectNode> jobNodes = loadJobDescriptions("JobsDescriptions.json");
 		Optional<List<Job>> jobsOptional = getJobsFromNodes(jobNodes);
 		if (jobsOptional.isPresent()) {
 			jobs.addAll(jobsOptional.get());
@@ -514,6 +646,11 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Treats the different user commands to interact with server
+	 * 
+	 * @throws IOException
+	 */
 	private void processCommands() throws IOException {
 		String command;
 		while ((command = queue.poll()) != null) {
@@ -541,6 +678,12 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Updates the inactivity times for all the keys in the selector
+	 * 
+	 * @param timeSpent
+	 *            long contains the amount to add to the inactivity time
+	 */
 	private void updateInactivityKeys(long timeSpent) {
 		for (SelectionKey key : selector.keys()) {
 			if (key.attachment() != null) {
@@ -550,6 +693,9 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Halts all clients
+	 */
 	private void haltClients() {
 		for (SelectionKey key : selector.keys()) {
 			if (key.attachment() != null) {
@@ -560,16 +706,31 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Halts the server after finishing process
+	 * 
+	 * @throws IOException
+	 */
 	private void shutdown() throws IOException {
 		silentlyClose(serverSocketChannel);
 	}
 
+	/**
+	 * Halts the server immediately
+	 * 
+	 * @throws IOException
+	 */
 	private void shutdownNow() throws IOException {
 		silentlyClose(serverSocketChannel);
 		haltClients();
 		Thread.currentThread().interrupt();
 	}
 
+	/**
+	 * Treats all the selected keys by the selector
+	 * 
+	 * @throws IOException
+	 */
 	private void processSelectedKeys() throws IOException {
 		for (SelectionKey key : selectedKeys) {
 			if (key.isValid() && key.isAcceptable()) {
@@ -590,6 +751,13 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Accepts new clients
+	 * 
+	 * @param key
+	 *            SelectionKey given by the selector
+	 * @throws IOException
+	 */
 	private void doAccept(SelectionKey key) throws IOException {
 		SocketChannel sc = serverSocketChannel.accept();
 		sc.configureBlocking(false);
@@ -597,6 +765,12 @@ public class ServerJarRet {
 		clientKey.attach(new Context(clientKey));
 	}
 
+	/**
+	 * Silently closes a socket channel
+	 * 
+	 * @param sc
+	 *            socket channel to be closed
+	 */
 	private static void silentlyClose(SelectableChannel sc) {
 		if (sc == null)
 			return;
@@ -607,6 +781,9 @@ public class ServerJarRet {
 		}
 	}
 
+	/**
+	 * Informs user about how to use this class
+	 */
 	private static void usage() {
 		System.out.println("ServerJarRet");
 	}

@@ -16,6 +16,15 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class JsonUtils {
 
+	/**
+	 * Converts a String to an ObjectNode
+	 * 
+	 * @param content
+	 *            String contains the json content
+	 * @return ObjectNode represents the json content
+	 * @throws JsonProcessingException
+	 * @throws IOException
+	 */
 	public static ObjectNode fromStringToJson(String content) throws JsonProcessingException, IOException {
 		ObjectMapper mapper = new ObjectMapper();
 		JsonNode node = mapper.readTree(content);
@@ -23,6 +32,14 @@ public class JsonUtils {
 		return objectNode;
 	}
 
+	/**
+	 * Parses a file to convert it to a String
+	 * 
+	 * @param path
+	 *            file path to parse
+	 * @return String contains the file content
+	 * @throws IOException
+	 */
 	public static String parseJsonFile(String path) throws IOException {
 		Path filePath = Paths.get(path);
 		BufferedReader reader = Files.newBufferedReader(filePath);

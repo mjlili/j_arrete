@@ -22,7 +22,6 @@ import upem.jarret.worker.Worker;
 import upem.jarret.worker.WorkerFactory;
 import utils.JsonUtils;
 
-//Il faut tenter de se reconnecter en cas de fermeture de la connexion du côté serveur
 public class ClientJarRet {
 
 	private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
@@ -36,13 +35,32 @@ public class ClientJarRet {
 	private String jobDescription;
 	private final HashMap<Long, HashMap<String, Worker>> workers;
 
-	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
+	/**
+	 * ClientJarRet constructor
+	 * 
+	 * @param clientId
+	 *            the client id
+	 * @param serverAddress
+	 *            the server address
+	 * @param port
+	 *            the server port
+	 */
+	public ClientJarRet(String clientId, String serverAddress, int port) {
 		this.clientId = Objects.requireNonNull(clientId);
 		this.serverAddress = serverAddress;
 		ClientJarRet.server = new InetSocketAddress(Objects.requireNonNull(serverAddress), port);
 		this.workers = new LinkedHashMap<>();
 	}
 
+	/**
+	 * Searches for an existing worker for the jobId and the workerVersion given
+	 * in the objectNode
+	 * 
+	 * @param objecNode
+	 *            contains information about the requested worker
+	 * @return an Optional<Worker> which contains the requested worker or empty
+	 *         if its instance was not found
+	 */
 	private Optional<Worker> getExistingWorkerInstance(ObjectNode objecNode) {
 		HashMap<String, Worker> workerByJobId = this.workers.get(objecNode.get("JobId"));
 		if (workerByJobId != null) {
@@ -54,6 +72,14 @@ public class ClientJarRet {
 		return Optional.empty();
 	}
 
+	/**
+	 * Instantiates a new instance of Worker if it was not found on the workers
+	 * list or gives the existing one
+	 * 
+	 * @param objectNode
+	 *            contains information about the requested worker
+	 * @return an existing instance of worker or a new one
+	 */
 	private Worker getFinalWorkerInstance(ObjectNode objectNode) {
 		Worker worker = null;
 		Optional<Worker> existingWorker = getExistingWorkerInstance(objectNode);
@@ -76,6 +102,16 @@ public class ClientJarRet {
 		return worker;
 	}
 
+	/**
+	 * Does the computation for a given task number using an instance of a
+	 * worker
+	 * 
+	 * @param objectNode
+	 *            contains information about the requested worker
+	 * @return String containing the result of the computation
+	 * @throws IOException
+	 *             in case of a computation error
+	 */
 	private Optional<String> launchComputation(ObjectNode objectNode) throws IOException {
 		System.out.println("Retrieving worker");
 		Worker worker = getFinalWorkerInstance(objectNode);
@@ -99,6 +135,12 @@ public class ClientJarRet {
 		return Optional.of(result);
 	}
 
+	/**
+	 * Prepares a GET request to the server
+	 * 
+	 * @throws IOException
+	 *             in case of a writing problem in the socket channel
+	 */
 	private void sendGetTaskRequest() throws IOException {
 		// this.socketChannel = SocketChannel.open();
 		// this.socketChannel.connect(server);
@@ -107,6 +149,12 @@ public class ClientJarRet {
 		ClientJarRet.socketChannel.write(CHARSET_UTF_8.encode(request));
 	}
 
+	/**
+	 * Prepares a computation error response
+	 * 
+	 * @throws IOException
+	 *             in case of a sending problem in the socket channel
+	 */
 	private void sendComputationErrorResponse() throws IOException {
 		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
@@ -114,6 +162,13 @@ public class ClientJarRet {
 		sendErrorResponse(objectNode);
 	}
 
+	/**
+	 * Prepares a too long error response in case of a computation result string
+	 * that is too long to be accepted by the server (4096 bytes)
+	 * 
+	 * @throws IOException
+	 *             in case of a sending problem in the socket channel
+	 */
 	private void sendTooLongErrorResponse() throws IOException {
 		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
@@ -121,6 +176,13 @@ public class ClientJarRet {
 		sendErrorResponse(objectNode);
 	}
 
+	/**
+	 * Prepares a nested error response in case of a computation result string
+	 * that contains an OBJECT field
+	 * 
+	 * @throws IOException
+	 *             in case of a sending problem in the socket channel
+	 */
 	private void sendAnswerNestedErrorResponse() throws IOException {
 		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
@@ -128,6 +190,13 @@ public class ClientJarRet {
 		sendErrorResponse(objectNode);
 	}
 
+	/**
+	 * Prepares a not json error in case of a string that is not representing a
+	 * json object
+	 * 
+	 * @throws IOException
+	 *             in case of a sending problem in the socket channel
+	 */
 	private void sendNotJsonErrorResponse() throws IOException {
 		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
@@ -135,6 +204,14 @@ public class ClientJarRet {
 		sendErrorResponse(objectNode);
 	}
 
+	/**
+	 * Sends any kind of error response to the server
+	 * 
+	 * @param objectNode
+	 *            contains information about the error response
+	 * @throws IOException
+	 *             in case of a writing problem in the socket channel
+	 */
 	private void sendErrorResponse(ObjectNode objectNode) throws IOException {
 		String requestHeader = "POST Answer " + currentHeader.getVersion() + "\r\n" + "Host: " + serverAddress + "\r\n"
 				+ "Content-Type: " + currentHeader.getContentType() + "\r\n" + "Content-Length: "
@@ -146,6 +223,9 @@ public class ClientJarRet {
 		ClientJarRet.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
+	/**
+	 * Connects the client's socket channel to the server
+	 */
 	public static void connect() {
 		try {
 			socketChannel.close();
@@ -173,6 +253,14 @@ public class ClientJarRet {
 		}
 	}
 
+	/**
+	 * Receives a job description from the server
+	 * 
+	 * @return Optional<String> containing the job description string and empty
+	 *         if something wrong happens
+	 * @throws IOException
+	 *             in case of problems in connection with server
+	 */
 	private Optional<String> receiveTaskFromServer() throws IOException {
 		ByteBuffer buffer = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		HTTPReader reader = new HTTPReader(socketChannel, buffer);
@@ -194,6 +282,16 @@ public class ClientJarRet {
 		return Optional.of(jobDescription);
 	}
 
+	/**
+	 * Sends the final response to the server
+	 * 
+	 * @param objectNode
+	 *            contains information about the response
+	 * @param computationResult
+	 *            contains the computation's result string
+	 * @throws JsonProcessingException
+	 *             in case of problems in writing prettily the content
+	 */
 	public void sendBackAnswer(ObjectNode objectNode, ObjectNode computationResult) throws JsonProcessingException {
 		objectNode.put("ClientId", clientId);
 		objectNode.set("Answer", computationResult);
@@ -206,7 +304,8 @@ public class ClientJarRet {
 				.append(CHARSET_UTF_8.encode(answerContent).remaining() + Integer.BYTES + Long.BYTES).append("\r\n")
 				.append("\r\n");
 		// TOOLONG RESPONSE
-		if (answerHeaderBuilder.toString().length() + objectNode.toString().length() > MAX_BUFFER_SIZE) {
+		if (CHARSET_UTF_8.encode(answerHeaderBuilder.toString()).remaining()
+				+ CHARSET_UTF_8.encode(answerContent).remaining() + Integer.BYTES + Long.BYTES > MAX_BUFFER_SIZE) {
 			try {
 				sendTooLongErrorResponse();
 			} catch (IOException e) {
@@ -222,8 +321,17 @@ public class ClientJarRet {
 		bufferToSend.putInt(objectNode.get("Task").asInt());
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
+		// BEGIN TESTING
+		ByteBuffer bufferToTest = ByteBuffer.allocate(MAX_BUFFER_SIZE);
+		bufferToTest.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
+		bufferToTest.putLong(objectNode.get("JobId").asLong());
+		bufferToTest.putInt(objectNode.get("Task").asInt());
+		bufferToTest.put(CHARSET_UTF_8.encode(answerContent));
+		bufferToTest.flip();
+		System.err.println(CHARSET_UTF_8.decode(bufferToTest).toString());
+		// END TESTING
 		try {
-			ClientJarRet.socketChannel.write(bufferToSend);
+			System.out.println("SENT : " + ClientJarRet.socketChannel.write(bufferToSend));
 		} catch (IOException e) {
 			System.out.println("Reconnexion ...");
 			connect();
@@ -231,6 +339,12 @@ public class ClientJarRet {
 		silentlyClose(ClientJarRet.socketChannel);
 	}
 
+	/**
+	 * Silently closes a socket channel
+	 * 
+	 * @param sc
+	 *            the sochket channel to be closed
+	 */
 	private static void silentlyClose(SelectableChannel sc) {
 		if (sc == null)
 			return;
@@ -275,6 +389,9 @@ public class ClientJarRet {
 		}
 	}
 
+	/**
+	 * Informs user about how to use this class
+	 */
 	private static void usage() {
 		System.out.println("Usage : ClientJarRet clientID serverAddress port");
 	}
