@@ -69,6 +69,22 @@ public class Job {
 		return workerClassName;
 	}
 
+	public int getDoneTasksNumber() {
+		return doneTasksNumber;
+	}
+
+	public void incrementeDoneTasksNumber() {
+		this.doneTasksNumber++;
+	}
+
+	public int getIndexOfAvailableTask() {
+		return bitSetTasks.nextClearBit(0);
+	}
+
+	public boolean isDone() {
+		return doneTasksNumber == jobTaskNumber;
+	}
+
 	@Override
 	public String toString() {
 		StringBuilder sb = new StringBuilder();
@@ -76,14 +92,6 @@ public class Job {
 		sb.append(jobTaskNumber).append(System.getProperty("line.separator"));
 		sb.append(workerURL).append(System.getProperty("line.separator"));
 		return sb.toString();
-	}
-
-	public void incrementeJobTaskNumber() {
-		this.jobTaskNumber++;
-	}
-	
-	public int getIndexOfAvailableTask() {
-		return bitSetTasks.nextClearBit(0);
 	}
 
 }

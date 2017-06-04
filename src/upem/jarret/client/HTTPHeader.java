@@ -1,4 +1,4 @@
-package upem.jarret.ClientJarRet;
+package upem.jarret.client;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;

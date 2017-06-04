@@ -1,8 +1,10 @@
-package upem.jarret.ClientJarRet;
+package upem.jarret.client;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
@@ -20,24 +22,25 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import upem.jarret.worker.Worker;
 import upem.jarret.worker.WorkerFactory;
+import utils.JsonTools;
 
+//Il faut tenter de se reconnecter en cas de fermeture de la connexion du côté serveur
 public class ClientJarRet {
 
 	private static final Charset CHARSET_UTF_8 = Charset.forName("UTF-8");
 	private static final int MAX_BUFFER_SIZE = 4096;
 
 	private String serverAddress;
-	private int port;
+	private static SocketAddress server;
 	private String clientId;
-	private SocketChannel socketChannel;
+	private static SocketChannel socketChannel;
 	private HTTPHeader currentHeader;
 	private String jobDescription;
 	private final HashMap<Long, HashMap<String, Worker>> workers;
 
 	public ClientJarRet(String clientId, String serverAddress, int port) throws IOException {
 		this.clientId = Objects.requireNonNull(clientId);
-		this.serverAddress = Objects.requireNonNull(serverAddress);
-		this.port = port;
+		ClientJarRet.server = new InetSocketAddress(Objects.requireNonNull(serverAddress), port);
 		this.workers = new LinkedHashMap<>();
 	}
 
@@ -52,7 +55,6 @@ public class ClientJarRet {
 		return Optional.empty();
 	}
 
-	// Faire une hashmap qui contient un jobid relié à une hashmap
 	private Worker getFinalWorkerInstance(ObjectNode objectNode) {
 		Worker worker = null;
 		Optional<Worker> existingWorker = getExistingWorkerInstance(objectNode);
@@ -120,36 +122,36 @@ public class ClientJarRet {
 	}
 
 	private void sendGetTaskRequest() throws IOException {
-		this.socketChannel = SocketChannel.open();
-		this.socketChannel.connect(new InetSocketAddress(serverAddress, port));
+		// this.socketChannel = SocketChannel.open();
+		// this.socketChannel.connect(server);
 		System.out.println("Asking for a new Task	");
 		String request = "GET Task HTTP/1.1\r\n" + "Host: " + serverAddress + "\r\n" + "\r\n";
-		this.socketChannel.write(CHARSET_UTF_8.encode(request));
+		ClientJarRet.socketChannel.write(CHARSET_UTF_8.encode(request));
 	}
 
 	private void sendComputationErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Computation error");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendTooLongErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Too Long");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendAnswerNestedErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is nested");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendNotJsonErrorResponse() throws IOException {
-		ObjectNode objectNode = fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is not valid JSON");
 		sendErrorResponse(objectNode);
@@ -163,14 +165,34 @@ public class ClientJarRet {
 		bufferToSend.put(CHARSET_UTF_8.encode(requestHeader));
 		bufferToSend.putLong(objectNode.get("JobId").asLong());
 		bufferToSend.putInt(objectNode.get("Task").asInt());
-		this.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
+		ClientJarRet.socketChannel.write(CHARSET_UTF_8.encode(requestHeader + objectNode.toString()));
 	}
 
-	private ObjectNode fromStringToJson(String content) throws JsonProcessingException, IOException {
-		ObjectMapper mapper = new ObjectMapper();
-		JsonNode node = mapper.readTree(content);
-		ObjectNode objectNode = (ObjectNode) node;
-		return objectNode;
+	public static void connect() {
+		try {
+			socketChannel.close();
+		} catch (Exception e) {
+			//
+		}
+		while (true) {
+			System.out.println("Trying to connect with server...");
+			try {
+				socketChannel = SocketChannel.open();
+				socketChannel.connect(server);
+				return;
+			} catch (ConnectException e) {
+				//
+			} catch (IOException e) {
+				//
+			}
+			try {
+				Thread.sleep(300);
+			} catch (IllegalArgumentException e) {
+				return;
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 	}
 
 	private Optional<String> receiveTaskFromServer() throws IOException {
@@ -186,11 +208,6 @@ public class ClientJarRet {
 			System.out.println("BAD REQUEST");
 			return Optional.empty();
 		}
-		// if (!currentHeader.getContentType().equals("application/json")) {
-		// System.out.println("There is no JSON content !!");
-		// sendNotJsonErrorResponse();
-		// return Optional.empty();
-		// }
 		int contentLength = currentHeader.getContentLength();
 		ByteBuffer contentBuffer = reader.readBytes(contentLength);
 		contentBuffer.flip();
@@ -203,18 +220,19 @@ public class ClientJarRet {
 			throws JsonProcessingException, IOException {
 		objectNode.put("ClientId", clientId);
 		objectNode.set("Answer", computationResult);
+		ObjectMapper mapper = new ObjectMapper();
+		String answerContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectNode);
 		StringBuilder answerHeaderBuilder = new StringBuilder();
 		answerHeaderBuilder.append("POST Answer ").append(currentHeader.getVersion()).append("\r\n").append("Host: ")
 				.append(serverAddress).append("\r\n").append("Content-Type: ").append(currentHeader.getContentType())
-				.append("\r\n").append("Content-Length: ").append(objectNode.toString().length()).append("\r\n")
+				.append("\r\n").append("Content-Length: ")
+				.append(CHARSET_UTF_8.encode(answerContent).remaining() + Integer.BYTES + Long.BYTES).append("\r\n")
 				.append("\r\n");
 		// TOOLONG RESPONSE
 		if (answerHeaderBuilder.toString().length() + objectNode.toString().length() > MAX_BUFFER_SIZE) {
 			sendTooLongErrorResponse();
 			return;
 		}
-		ObjectMapper mapper = new ObjectMapper();
-		String answerContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectNode);
 		System.out.println("Writing answer to server");
 		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		bufferToSend.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
@@ -222,7 +240,7 @@ public class ClientJarRet {
 		bufferToSend.putInt(objectNode.get("Task").asInt());
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
-		this.socketChannel.write(bufferToSend);
+		ClientJarRet.socketChannel.write(bufferToSend);
 		socketChannel.close();
 	}
 
@@ -233,10 +251,11 @@ public class ClientJarRet {
 		}
 		ClientJarRet client = new ClientJarRet(args[0], args[1], Integer.parseInt(args[2]));
 		while (!Thread.interrupted()) {
+			ClientJarRet.connect();
 			client.sendGetTaskRequest();
 			Optional<String> task = client.receiveTaskFromServer();
 			if (task.isPresent()) {
-				ObjectNode objectNode = client.fromStringToJson(task.get());
+				ObjectNode objectNode = JsonTools.fromStringToJson(task.get());
 				if (objectNode.get("ComeBackInSeconds") != null) {
 					System.out.println("SLEEPING for : "
 							+ Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) + " seconds");
@@ -248,7 +267,7 @@ public class ClientJarRet {
 						+ objectNode.get("WorkerVersion") + ")");
 				Optional<String> computationResultOptional = client.launchComputation(objectNode);
 				if (computationResultOptional.isPresent()) {
-					ObjectNode computationResult = client.fromStringToJson(computationResultOptional.get());
+					ObjectNode computationResult = JsonTools.fromStringToJson(computationResultOptional.get());
 					if (client.jsonContainsObjectField(computationResult)) {
 						client.sendAnswerNestedErrorResponse();
 						continue;
