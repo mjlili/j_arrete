@@ -6,23 +6,21 @@ import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.SelectableChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeType;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import upem.jarret.worker.Worker;
 import upem.jarret.worker.WorkerFactory;
-import utils.JsonTools;
+import utils.JsonUtils;
 
 //Il faut tenter de se reconnecter en cas de fermeture de la connexion du côté serveur
 public class ClientJarRet {
@@ -78,27 +76,6 @@ public class ClientJarRet {
 		return worker;
 	}
 
-	private boolean isValidJsonString(String jsonString) {
-		try {
-			final ObjectMapper mapper = new ObjectMapper();
-			mapper.readTree(jsonString);
-			return true;
-		} catch (IOException e) {
-			return false;
-		}
-	}
-
-	private boolean jsonContainsObjectField(ObjectNode objectNode) {
-		Iterator<JsonNode> iterator = objectNode.elements();
-		while (iterator.hasNext()) {
-			JsonNode node = iterator.next();
-			if (node.getNodeType() == JsonNodeType.OBJECT) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	private Optional<String> launchComputation(ObjectNode objectNode) throws IOException {
 		System.out.println("Retrieving worker");
 		Worker worker = getFinalWorkerInstance(objectNode);
@@ -115,7 +92,7 @@ public class ClientJarRet {
 			sendComputationErrorResponse();
 			return Optional.empty();
 		}
-		if (!isValidJsonString(result)) {
+		if (!JsonUtils.isValidJsonString(result)) {
 			sendNotJsonErrorResponse();
 			return Optional.empty();
 		}
@@ -131,28 +108,28 @@ public class ClientJarRet {
 	}
 
 	private void sendComputationErrorResponse() throws IOException {
-		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Computation error");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendTooLongErrorResponse() throws IOException {
-		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Too Long");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendAnswerNestedErrorResponse() throws IOException {
-		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is nested");
 		sendErrorResponse(objectNode);
 	}
 
 	private void sendNotJsonErrorResponse() throws IOException {
-		ObjectNode objectNode = JsonTools.fromStringToJson(jobDescription);
+		ObjectNode objectNode = JsonUtils.fromStringToJson(jobDescription);
 		objectNode.put("ClientId", clientId);
 		objectNode.put("Error", "Answer is not valid JSON");
 		sendErrorResponse(objectNode);
@@ -217,8 +194,7 @@ public class ClientJarRet {
 		return Optional.of(jobDescription);
 	}
 
-	public void sendBackAnswer(ObjectNode objectNode, ObjectNode computationResult)
-			throws JsonProcessingException, IOException {
+	public void sendBackAnswer(ObjectNode objectNode, ObjectNode computationResult) throws JsonProcessingException {
 		objectNode.put("ClientId", clientId);
 		objectNode.set("Answer", computationResult);
 		ObjectMapper mapper = new ObjectMapper();
@@ -231,25 +207,38 @@ public class ClientJarRet {
 				.append("\r\n");
 		// TOOLONG RESPONSE
 		if (answerHeaderBuilder.toString().length() + objectNode.toString().length() > MAX_BUFFER_SIZE) {
-			sendTooLongErrorResponse();
+			try {
+				sendTooLongErrorResponse();
+			} catch (IOException e) {
+				System.out.println("Reconnexion ...");
+				connect();
+			}
 			return;
 		}
 		System.out.println("Writing answer to server");
-		ByteBuffer bufferToTest = ByteBuffer.allocate(MAX_BUFFER_SIZE);
-		bufferToTest.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
-		bufferToTest.putLong(objectNode.get("JobId").asLong());
-		bufferToTest.putInt(objectNode.get("Task").asInt());
-		bufferToTest.put(CHARSET_UTF_8.encode(answerContent));
-		bufferToTest.flip();
-		System.err.println("SENDING ANSWER :\n" + CHARSET_UTF_8.decode(bufferToTest).toString());
 		ByteBuffer bufferToSend = ByteBuffer.allocate(MAX_BUFFER_SIZE);
 		bufferToSend.put(CHARSET_UTF_8.encode(answerHeaderBuilder.toString()));
 		bufferToSend.putLong(objectNode.get("JobId").asLong());
 		bufferToSend.putInt(objectNode.get("Task").asInt());
 		bufferToSend.put(CHARSET_UTF_8.encode(answerContent));
 		bufferToSend.flip();
-		ClientJarRet.socketChannel.write(bufferToSend);
-		ClientJarRet.socketChannel.close();
+		try {
+			ClientJarRet.socketChannel.write(bufferToSend);
+		} catch (IOException e) {
+			System.out.println("Reconnexion ...");
+			connect();
+		}
+		silentlyClose(ClientJarRet.socketChannel);
+	}
+
+	private static void silentlyClose(SelectableChannel sc) {
+		if (sc == null)
+			return;
+		try {
+			sc.close();
+		} catch (IOException e) {
+			// silently ignore
+		}
 	}
 
 	public static void main(String[] args) throws IOException, NumberFormatException, InterruptedException {
@@ -263,7 +252,7 @@ public class ClientJarRet {
 			client.sendGetTaskRequest();
 			Optional<String> task = client.receiveTaskFromServer();
 			if (task.isPresent()) {
-				ObjectNode objectNode = JsonTools.fromStringToJson(task.get());
+				ObjectNode objectNode = JsonUtils.fromStringToJson(task.get());
 				if (objectNode.get("ComeBackInSeconds") != null) {
 					System.out.println("SLEEPING for : "
 							+ Integer.parseInt(objectNode.get("ComeBackInSeconds").asText()) + " seconds");
@@ -275,8 +264,8 @@ public class ClientJarRet {
 						+ objectNode.get("WorkerVersion") + ")");
 				Optional<String> computationResultOptional = client.launchComputation(objectNode);
 				if (computationResultOptional.isPresent()) {
-					ObjectNode computationResult = JsonTools.fromStringToJson(computationResultOptional.get());
-					if (client.jsonContainsObjectField(computationResult)) {
+					ObjectNode computationResult = JsonUtils.fromStringToJson(computationResultOptional.get());
+					if (JsonUtils.jsonContainsObjectField(computationResult)) {
 						client.sendAnswerNestedErrorResponse();
 						continue;
 					}

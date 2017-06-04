@@ -37,7 +37,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import upem.jarret.job.Job;
-import utils.JsonTools;
+import utils.JsonUtils;
 
 public class ServerJarRet {
 
@@ -80,10 +80,10 @@ public class ServerJarRet {
 		}
 
 		private void process() throws IOException {
-			// in.flip();
 			if (isReadingRequest()) {
 				try {
 					setRequest(reader.readLineCRLF());
+					System.out.println("current request : \n" + getRequest());
 					setReadingRequest(false);
 				} catch (IllegalStateException e) {
 					// Pour dire que la lecture de la ligne n'a rien donné
@@ -150,6 +150,8 @@ public class ServerJarRet {
 			String command = tokens[0];
 			String requestNature = tokens[1];
 			String httpVersion = tokens[2];
+			System.out.println(
+					"Command : " + command + " Request Nature : " + requestNature + " HTTP Version :" + httpVersion);
 			if (command.equals("GET") && requestNature.equals("Task") && httpVersion.equals("HTTP/1.1")) {
 				if (!isParsingRequest()) {
 					saveLog("Client " + sc.getRemoteAddress() + " is requesting a task");
@@ -168,8 +170,8 @@ public class ServerJarRet {
 				}
 				setParsingRequest(true);
 				try {
-					String answer = parsePOST();
-					requestResponse(answer);
+					String response = parsePostClientAnswer();
+					updateResponse(response);
 					setParsingRequest(false);
 				} catch (IllegalStateException e) {
 					// The client answer does not contain a json content
@@ -181,7 +183,7 @@ public class ServerJarRet {
 			}
 		}
 
-		private String parsePOST() throws IOException {
+		private String parsePostClientAnswer() throws IOException {
 			if (!isReadingAnswer()) {
 				String line;
 				while (!(line = reader.readLineCRLF()).equals("")) {
@@ -203,8 +205,8 @@ public class ServerJarRet {
 			long jobId = content.getLong();
 			int taskNumber = content.getInt();
 			String response = CHARSET_UTF_8.decode(content).toString();
-			if (response != null && JsonTools.isJSON(response)) {
-				ServerJarRet.saveAnswer(jobId, taskNumber, response);
+			if (response != null && JsonUtils.isValidJsonString(response)) {
+				ServerJarRet.saveAnswer(jobId, response);
 			}
 			return response;
 		}
@@ -297,7 +299,7 @@ public class ServerJarRet {
 			this.reader = reader;
 		}
 
-		public void requestResponse(String response) {
+		public void updateResponse(String response) {
 			this.setResponse(response);
 			this.setSendingPost(true);
 		}
@@ -327,7 +329,7 @@ public class ServerJarRet {
 	}
 
 	public static ServerJarRet getServerJarRet() throws IOException {
-		ObjectNode configs = JsonTools.fromStringToJson(JsonTools.parseJsonFile("JarRetConfig.json"));
+		ObjectNode configs = JsonUtils.fromStringToJson(JsonUtils.parseJsonFile("JarRetConfig.json"));
 		int serverPort = configs.get("ServerPort").asInt();
 		ServerJarRet server = new ServerJarRet(serverPort);
 		ServerJarRet.maxResponseFileSize = configs.get("MaxResponseFileSize").asLong();
@@ -345,10 +347,9 @@ public class ServerJarRet {
 				.append(job.getWorkerURL()).append("\", ").append("\"WorkerClassName\": \"")
 				.append(job.getWorkerClassName()).append("\", ").append("\"Task\": \"")
 				.append(job.getIndexOfAvailableTask()).append("\"}");
-		ObjectNode objectNode = JsonTools.fromStringToJson(sb.toString());
+		ObjectNode objectNode = JsonUtils.fromStringToJson(sb.toString());
 		ObjectMapper mapper = new ObjectMapper();
 		String responseContent = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(objectNode);
-		System.out.println(responseContent);
 		return responseContent;
 	}
 
@@ -456,7 +457,7 @@ public class ServerJarRet {
 		listener.start();
 	}
 
-	private static void saveAnswer(long jobId, int taskNum, String response) throws IOException {
+	private static void saveAnswer(long jobId, String response) throws IOException {
 		int fileNumber = 1;
 		long size = 0;
 		Path responseFilePath;
@@ -497,13 +498,9 @@ public class ServerJarRet {
 			serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
 			Set<SelectionKey> selectedKeys = selector.selectedKeys();
 			while (!Thread.interrupted()) {
-				// printKeys();
-				// System.out.println("Starting select");
 				long startLoop = System.currentTimeMillis();
 				selector.select(TIMEOUT / 10);
 				processCommands();
-				// printSelectedKey();
-				// System.out.println("Select finished");
 				processSelectedKeys();
 				long endLoop = System.currentTimeMillis();
 				long timeSpent = endLoop - startLoop;
@@ -612,85 +609,6 @@ public class ServerJarRet {
 
 	private static void usage() {
 		System.out.println("ServerJarRet");
-	}
-
-	/***
-	 * Theses methods are here to help understanding the behavior of the
-	 * selector
-	 ***/
-
-	private String interestOpsToString(SelectionKey key) {
-		if (!key.isValid()) {
-			return "CANCELLED";
-		}
-		int interestOps = key.interestOps();
-		ArrayList<String> list = new ArrayList<>();
-		if ((interestOps & SelectionKey.OP_ACCEPT) != 0)
-			list.add("OP_ACCEPT");
-		if ((interestOps & SelectionKey.OP_READ) != 0)
-			list.add("OP_READ");
-		if ((interestOps & SelectionKey.OP_WRITE) != 0)
-			list.add("OP_WRITE");
-		return String.join("|", list);
-	}
-
-	public void printKeys() {
-		Set<SelectionKey> selectionKeySet = selector.keys();
-		if (selectionKeySet.isEmpty()) {
-			System.out.println("The selector contains no key : this should not happen!");
-			return;
-		}
-		System.out.println("The selector contains:");
-		for (SelectionKey key : selectionKeySet) {
-			SelectableChannel channel = key.channel();
-			if (channel instanceof ServerSocketChannel) {
-				System.out.println("\tKey for ServerSocketChannel : " + interestOpsToString(key));
-			} else {
-				SocketChannel sc = (SocketChannel) channel;
-				System.out.println("\tKey for Client " + remoteAddressToString(sc) + " : " + interestOpsToString(key));
-			}
-		}
-	}
-
-	private String remoteAddressToString(SocketChannel sc) {
-		try {
-			return sc.getRemoteAddress().toString();
-		} catch (IOException e) {
-			return "???";
-		}
-	}
-
-	private void printSelectedKey() {
-		if (selectedKeys.isEmpty()) {
-			System.out.println("There were not selected keys.");
-			return;
-		}
-		System.out.println("The selected keys are :");
-		for (SelectionKey key : selectedKeys) {
-			SelectableChannel channel = key.channel();
-			if (channel instanceof ServerSocketChannel) {
-				System.out.println("\tServerSocketChannel can perform : " + possibleActionsToString(key));
-			} else {
-				SocketChannel sc = (SocketChannel) channel;
-				System.out.println(
-						"\tClient " + remoteAddressToString(sc) + " can perform : " + possibleActionsToString(key));
-			}
-
-		}
-	}
-
-	private String possibleActionsToString(SelectionKey key) {
-		if (!key.isValid()) {
-			return "CANCELLED";
-		}
-		ArrayList<String> list = new ArrayList<>();
-		if (key.isAcceptable())
-			list.add("ACCEPT");
-		if (key.isReadable())
-			list.add("READ");
-		if (key.isWritable())
-			list.add("WRITE");
-		return String.join(" and ", list);
 	}
 
 	public static void main(String[] args) throws NumberFormatException, IOException {
